@@ -130,6 +130,29 @@ void S3BucketMetadata::set_bucket_replication_configuration(
   bucket_replication_configuration = bucket_replication_config;
 }
 
+void S3BucketMetadata::set_credentials_and_alias_name(
+    const std::string& creds, const std::string& alias_name) {
+  s3_log(S3_LOG_DEBUG, request_id, "set_credentials_and_alias_name\n");
+  creds_str = creds;
+  alias_name_str = alias_name;
+  alias_name_set.insert(alias_name);
+}
+
+const std::string& S3BucketMetadata::get_alias_name() { return alias_name_str; }
+
+const std::string& S3BucketMetadata::get_alias_name_list_as_xml() {
+  alias_name_response_xml += "<ListAllAliasNameResult>";
+
+  for (const auto& name : alias_name_set) {
+    alias_name_response_xml += "<Alias>";
+    alias_name_response_xml += name;
+    alias_name_response_xml += "</Alias>";
+  }
+
+  alias_name_response_xml += "</ListAllAliasNameResult>";
+
+  return alias_name_response_xml;
+}
 // Streaming to json
 std::string S3BucketMetadata::to_json() {
   s3_log(S3_LOG_DEBUG, request_id, "Called\n");
@@ -169,6 +192,15 @@ std::string S3BucketMetadata::to_json() {
   if (!bucket_replication_configuration.empty()) {
     root["ReplicationConfiguration"] = bucket_replication_configuration;
   }
+
+  // TO DO::Encrypt credentials
+  Json::Value alias_node(Json::arrayValue);
+  for (const auto& itr : alias_name_set) {
+    alias_node.append(itr);
+  }
+  root["alias_name_set"] = alias_node;
+  root["remote_credentials"] = creds_str;
+
   S3DateTime current_time;
   current_time.init_current_time();
   root["create_timestamp"] = current_time.get_isoformat_string();
@@ -230,6 +262,13 @@ int S3BucketMetadata::from_json(std::string content) {
   bucket_replication_configuration =
       newroot["ReplicationConfiguration"].asString();
 
+  Json::Value rule_array = newroot["alias_name_set"];
+  alias_name_set.clear();
+  Json::Value rule_object;
+  for (unsigned int index = 0; index < rule_array.size(); ++index) {
+    rule_object = rule_array[index];
+    alias_name_set.insert(rule_object.asString());
+  }
   return 0;
 }
 
@@ -364,6 +403,15 @@ void S3BucketMetadata::delete_bucket_replication_config() {
   bucket_replication_configuration = "";
 }
 
+// Delete remote bucket credentials and alias name
+bool S3BucketMetadata::delete_bucket_remote_creds_and_alias_name(
+    std::string alias_name) {
+  if (alias_name_set.find(alias_name) != alias_name_set.end()) {
+    alias_name_set.erase(alias_name);
+    return true;
+  }
+  return false;
+}
 void S3BucketMetadata::setacl(const std::string& acl_str) {
   encoded_acl = acl_str;
 }
@@ -451,6 +499,11 @@ bool S3BucketMetadata::check_bucket_tags_exists() const {
 // Check if repliaction configuration exists for a bucket
 bool S3BucketMetadata::check_bucket_replication_exists() {
   return !bucket_replication_configuration.empty();
+}
+
+// Check if remote credentials added for a bucket
+bool S3BucketMetadata::check_bucket_remote_alias_list_exists() {
+  return !alias_name_set.empty();
 }
 
 void S3BucketMetadata::load(std::function<void(void)>,
